@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-config
+data:
+  region: us-east-1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+data:
+  address: https://vault.cloudsec-platform.internal:8200
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentication-service-vault-config
+data:
+  vault-agent.hcl: |
+    pid_file = "/vault/token/vault-agent.pid"
+
+    auto_auth {
+      method "kubernetes" {
+        mount_path = "auth/kubernetes"
+        config = {
+          role = "authentication-service"
+        }
+      }
+
+      sink "file" {
+        config = {
+          path = "/vault/token/vault-token"
+        }
+      }
+    }
+
+    template {
+      source = "/vault/config/templates/config.tpl"
+      destination = "/vault/secrets/config.json"
+    }
+
+    vault {
+      address = "https://vault.cloudsec-platform.internal:8200"
+    }
+  templates/config.tpl: |
+    {
+      "cognito": {
+        "userPoolId": "{{ with secret "secret/data/authentication-service/config" }}{{ .Data.data.cognito_user_pool_id }}{{ end }}",
+        "clientId": "{{ with secret "secret/data/authentication-service/config" }}{{ .Data.data.cognito_client_id }}{{ end }}"
+      },
+      "jwt": {
+        "secret": "{{ with secret "secret/data/authentication-service/config" }}{{ .Data.data.jwt_secret }}{{ end }}"
+      },
+      "aws": {
+        "region": "us-east-1",
+        "credentials": {
+          "accessKey": "{{ with secret "aws/creds/authentication-service" }}{{ .Data.access_key }}{{ end }}",
+          "secretKey": "{{ with secret "aws/creds/authentication-service" }}{{ .Data.secret_key }}{{ end }}"
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: business-service-vault-config
+data:
+  vault-agent.hcl: |
+    pid_file = "/vault/token/vault-agent.pid"
+
+    auto_auth {
+      method "kubernetes" {
+        mount_path = "auth/kubernetes"
+        config = {
+          role = "business-service"
+        }
+      }
+
+      sink "file" {
+        config = {
+          path = "/vault/token/vault-token"
+        }
+      }
+    }
+
+    template {
+      source = "/vault/config/templates/config.tpl"
+      destination = "/vault/secrets/config.json"
+    }
+
+    vault {
+      address = "https://vault.cloudsec-platform.internal:8200"
+    }
+  templates/config.tpl: |
+    {
+      "database": {
+        "dynamoDb": {
+          "table": "{{ with secret "secret/data/business-service/config" }}{{ .Data.data.dynamodb_table }}{{ end }}"
+        }
+      },
+      "api": {
+        "key": "{{ with secret "secret/data/business-service/config" }}{{ .Data.data.api_key }}{{ end }}"
+      },
+      "aws": {
+        "region": "us-east-1",
+        "credentials": {
+          "accessKey": "{{ with secret "aws/creds/business-service" }}{{ .Data.access_key }}{{ end }}",
+          "secretKey": "{{ with secret "aws/creds/business-service" }}{{ .Data.secret_key }}{{ end }}"
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-service-vault-config
+data:
+  vault-agent.hcl: |
+    pid_file = "/vault/token/vault-agent.pid"
+
+    auto_auth {
+      method "kubernetes" {
+        mount_path = "auth/kubernetes"
+        config = {
+          role = "frontend-service"
+        }
+      }
+
+      sink "file" {
+        config = {
+          path = "/vault/token/vault-token"
+        }
+      }
+    }
+
+    template {
+      source = "/vault/config/templates/config.tpl"
+      destination = "/vault/secrets/config.json"
+    }
+
+    vault {
+      address = "https://vault.cloudsec-platform.internal:8200"
+    }
+  templates/config.tpl: |
+    {
+      "api": {
+        "authServiceUrl": "{{ with secret "secret/data/api-endpoints/urls" }}{{ .Data.data.auth_service }}{{ end }}",
+        "businessServiceUrl": "{{ with secret "secret/data/api-endpoints/urls" }}{{ .Data.data.business_service }}{{ end }}"
+      }
+    }

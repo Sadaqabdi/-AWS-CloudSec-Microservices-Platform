@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation template for CloudWatch monitoring setup'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+  RetentionInDays:
+    Type: Number
+    Default: 30
+    Description: Number of days to retain log events
+
+  EksClusterName:
+    Type: String
+    Default: cloudsec-eks-cluster
+    Description: Name of the EKS cluster
+
+Resources:
+  # CloudWatch Log Groups for microservices
+  AuthenticationServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/eks/${EksClusterName}/authentication-service"
+      RetentionInDays: !Ref RetentionInDays
+
+  BusinessServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/eks/${EksClusterName}/business-service"
+      RetentionInDays: !Ref RetentionInDays
+
+  FrontendServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/eks/${EksClusterName}/frontend-service"
+      RetentionInDays: !Ref RetentionInDays
+
+  # CloudWatch Log Group for Vault
+  VaultLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/eks/${EksClusterName}/vault"
+      RetentionInDays: !Ref RetentionInDays
+
+  # CloudWatch Dashboard for microservices
+  MicroservicesDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "CloudSec-Microservices-${Environment}"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 1,
+              "properties": {
+                "markdown": "# AWS CloudSec Microservices Platform - ${Environment} Environment"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 1,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                  [ "AWS/EKS", "pod_cpu_utilization", "ClusterName", "${EksClusterName}", "Namespace", "default", "PodName", "authentication-service" ],
+                  [ "...", "business-service" ],
+                  [ "...", "frontend-service" ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "CPU Utilization by Service",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 1,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                  [ "AWS/EKS", "pod_memory_utilization", "ClusterName", "${EksClusterName}", "Namespace", "default", "PodName", "authentication-service" ],
+                  [ "...", "business-service" ],
+                  [ "...", "frontend-service" ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Memory Utilization by Service",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 7,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                  [ "AWS/ApiGateway", "Count", "ApiName", "CloudSecApi" ],
+                  [ ".", "4XXError" ],
+                  [ ".", "5XXError" ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "API Gateway Requests",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 7,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": false,
+                "metrics": [
+                  [ "AWS/ApiGateway", "Latency", "ApiName", "CloudSecApi", "Stage", "${Environment}", "Resource", "/auth" ],
+                  [ "...", "/api" ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "API Gateway Latency",
+                "period": 300
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 13,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '/aws/eks/${EksClusterName}/authentication-service' | SOURCE '/aws/eks/${EksClusterName}/business-service' | SOURCE '/aws/eks/${EksClusterName}/frontend-service' | filter level = 'error' | stats count() by bin(30s)",
+                "region": "${AWS::Region}",
+                "title": "Error Logs Across Services",
+                "view": "timeSeries"
+              }
+            }
+          ]
+        }
+
+  # CloudWatch Alarms
+  HighCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EksClusterName}-HighCpuUtilization"
+      AlarmDescription: "Alarm when CPU utilization exceeds 80%"
+      MetricName: pod_cpu_utilization
+      Namespace: AWS/EKS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EksClusterName
+      AlarmActions:
+        - !Ref AlertingTopic
+
+  HighMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${EksClusterName}-HighMemoryUtilization"
+      AlarmDescription: "Alarm when memory utilization exceeds 80%"
+      MetricName: pod_memory_utilization
+      Namespace: AWS/EKS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EksClusterName
+      AlarmActions:
+        - !Ref AlertingTopic
+
+  ApiGateway5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: "ApiGateway-5xxErrors"
+      AlarmDescription: "Alarm when 5XX errors exceed threshold"
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ApiName
+          Value: CloudSecApi
+      AlarmActions:
+        - !Ref AlertingTopic
+
+  # SNS Topic for Alerting
+  AlertingTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: "CloudSec Platform Alerts"
+      TopicName: !Sub "cloudsec-alerts-${Environment}"
+
+  # SNS Subscription for email alerts
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: "alerts@example.com"
+      TopicArn: !Ref AlertingTopic
+
+Outputs:
+  DashboardURL:
+    Description: URL to the CloudWatch Dashboard
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${MicroservicesDashboard}"
+  
+  AlertingTopicARN:
+    Description: ARN of the SNS Topic for alerting
+    Value: !Ref AlertingTopic

@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentication-service
+  labels:
+    app: authentication-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: authentication-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: authentication-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: authentication-service-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: authentication-service
+        image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/authentication-service:latest
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - containerPort: 3000
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: aws-config
+              key: region
+        volumeMounts:
+        - name: vault-secrets
+          mountPath: /usr/src/app/vault/secrets
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      - name: vault-agent
+        image: hashicorp/vault:1.12.0
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+        args:
+        - "agent"
+        - "-config=/vault/config/vault-agent.hcl"
+        volumeMounts:
+        - name: vault-config
+          mountPath: /vault/config
+        - name: vault-secrets
+          mountPath: /vault/secrets
+        - name: vault-token
+          mountPath: /vault/token
+        env:
+        - name: VAULT_ADDR
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: address
+      volumes:
+      - name: vault-config
+        configMap:
+          name: authentication-service-vault-config
+      - name: vault-secrets
+        emptyDir:
+          medium: Memory
+      - name: vault-token
+        emptyDir:
+          medium: Memory
+      - name: tmp
+        emptyDir: {}

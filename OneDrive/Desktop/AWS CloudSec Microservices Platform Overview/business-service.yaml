@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: business-service
+  labels:
+    app: business-service
+spec:
+  selector:
+    app: business-service
+  ports:
+  - port: 80
+    targetPort: 3001
+    protocol: TCP
+    name: http
+  type: ClusterIP

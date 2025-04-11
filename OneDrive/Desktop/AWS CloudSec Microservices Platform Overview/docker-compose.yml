@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # Authentication Service
+  authentication-service:
+    build:
+      context: ../microservices/authentication-service
+      dockerfile: ../../docker/authentication-service.Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - AWS_REGION=us-east-1
+      - COGNITO_USER_POOL_ID=us-east-1_example
+      - COGNITO_CLIENT_ID=example-client-id
+    volumes:
+      - ../vault/integration/authentication-service:/usr/src/app/vault
+    networks:
+      - cloudsec-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Business Service
+  business-service:
+    build:
+      context: ../microservices/business-service
+      dockerfile: ../../docker/business-service.Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - AWS_REGION=us-east-1
+      - DYNAMODB_TABLE=cloudsec-business-items
+    volumes:
+      - ../vault/integration/business-service:/usr/src/app/vault
+    networks:
+      - cloudsec-network
+    depends_on:
+      - authentication-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Frontend Service
+  frontend-service:
+    build:
+      context: ../microservices/frontend-service
+      dockerfile: ../../docker/frontend-service.Dockerfile
+    ports:
+      - "3002:3000"
+    environment:
+      - NODE_ENV=development
+      - AUTH_SERVICE_URL=http://authentication-service:3000
+      - BUSINESS_SERVICE_URL=http://business-service:3001
+    volumes:
+      - ../vault/integration/frontend-service:/usr/src/app/vault
+    networks:
+      - cloudsec-network
+    depends_on:
+      - authentication-service
+      - business-service
+
+  # Vault Server (Development Mode)
+  vault-dev:
+    image: hashicorp/vault:1.12.0
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=dev-only-token
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - cloudsec-network
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Vault Agent Sidecar for Authentication Service
+  vault-agent-auth:
+    image: hashicorp/vault:1.12.0
+    command: agent -config=/vault/config/vault-agent.hcl
+    volumes:
+      - ../vault/integration/authentication-service:/vault/config
+    networks:
+      - cloudsec-network
+    depends_on:
+      - vault-dev
+      - authentication-service
+
+  # Vault Agent Sidecar for Business Service
+  vault-agent-business:
+    image: hashicorp/vault:1.12.0
+    command: agent -config=/vault/config/vault-agent.hcl
+    volumes:
+      - ../vault/integration/business-service:/vault/config
+    networks:
+      - cloudsec-network
+    depends_on:
+      - vault-dev
+      - business-service
+
+  # Vault Agent Sidecar for Frontend Service
+  vault-agent-frontend:
+    image: hashicorp/vault:1.12.0
+    command: agent -config=/vault/config/vault-agent.hcl
+    volumes:
+      - ../vault/integration/frontend-service:/vault/config
+    networks:
+      - cloudsec-network
+    depends_on:
+      - vault-dev
+      - frontend-service
+
+networks:
+  cloudsec-network:
+    driver: bridge

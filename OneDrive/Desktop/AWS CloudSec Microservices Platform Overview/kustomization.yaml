@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - authentication-deployment.yaml
+  - authentication-service.yaml
+  - authentication-network-policy.yaml
+  - business-deployment.yaml
+  - business-service.yaml
+  - business-network-policy.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - frontend-network-policy.yaml
+  - default-network-policy.yaml
+  - ingress.yaml
+  - configmaps.yaml
+  - service-accounts.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: aws-cloudsec-platform
+  app.kubernetes.io/managed-by: kustomize
+
+vars:
+  - name: AWS_ACCOUNT_ID
+    objref:
+      kind: ConfigMap
+      name: aws-config
+      apiVersion: v1
+    fieldref:
+      fieldpath: data.account_id
+  - name: AWS_REGION
+    objref:
+      kind: ConfigMap
+      name: aws-config
+      apiVersion: v1
+    fieldref:
+      fieldpath: data.region
